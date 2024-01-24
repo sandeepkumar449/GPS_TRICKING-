@@ -1,0 +1,66 @@
+#include <stdio.h>
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "driver/uart.h"
+#include "esp_system.h"
+#include "esp_log.h"
+
+#define TXD_PIN 27
+#define RXD_PIN 26
+#define BUF_SIZE (1024)
+#define MODEM_PWKEY 4
+
+void init_uart() {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << MODEM_PWKEY),
+        .mode = GPIO_MODE_OUTPUT,
+        .intr_type = GPIO_INTR_DISABLE,
+        .pull_down_en = 0,
+        .pull_up_en = 0,
+    };
+    gpio_config(&io_conf);
+
+    gpio_set_level(MODEM_PWKEY, 1); // Power on
+    vTaskDelay(pdMS_TO_TICKS(5000)); // Adjust the delay based on the modem initialization time
+
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+
+    uart_param_config(UART_NUM_2, &uart_config);
+    uart_set_pin(UART_NUM_2, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_driver_install(UART_NUM_2, BUF_SIZE * 2, 0, 0, NULL, 0);
+}
+
+void send_at_command(const char *command) {
+    uart_write_bytes(UART_NUM_2, command, strlen(command));
+}
+
+void read_response() {
+    uint8_t *data = (uint8_t*) malloc(BUF_SIZE);
+    int length = uart_read_bytes(UART_NUM_2, data, BUF_SIZE, 20 / portTICK_PERIOD_MS);
+
+    if (length > 0) {
+        printf("Response: %.*s\n", length, data);
+    }
+    free(data);
+}
+
+void app_main() {
+    init_uart();
+    while(1){
+        // Send AT commands to get information from SIM7600E-H
+        send_at_command("AT\r\n");
+        read_response();
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        send_at_command("AT+CGPSINFO\r\n"); // SIM Card Information
+        read_response();
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
